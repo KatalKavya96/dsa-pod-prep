@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local embedded database
+/.data
+!.env.example
+
+# package manager cache / local tool settings
+/.pnpm-store
+/.claude

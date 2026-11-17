@@ -1,0 +1,54 @@
+name: Background jobs
+
+# Free scheduler for the worker. Public repos get unlimited Actions minutes;
+# for a private repo, move `reminders` to an external cron hitting /api/cron/reminders.
+# GitHub may delay scheduled runs by a few minutes; every job is idempotent.
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # reminders
+    - cron: "7 * * * *"      # member sync + evaluation (hourly)
+    - cron: "30 */6 * * *"   # contest sync
+    - cron: "30 3 * * *"     # inactive digest (09:00 IST)
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Job to run"
+        required: true
+        type: choice
+        options: [reminders, sync-members, sync-contests, evaluate, inactive-digest, seed-milestones]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    concurrency:
+      group: job-${{ github.event.schedule || inputs.job }}
+      cancel-in-progress: false
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      BETTER_AUTH_URL: ${{ vars.APP_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHANNEL_ID: ${{ vars.TELEGRAM_CHANNEL_ID }}
+      TELEGRAM_ADMIN_CHAT_ID: ${{ vars.TELEGRAM_ADMIN_CHAT_ID }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      NODE_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Pick job
+        id: pick
+        run: |
+          case "${{ github.event.schedule }}" in
+            "*/15 * * * *") echo "job=reminders" >> "$GITHUB_OUTPUT" ;;
+            "7 * * * *") echo "job=sync-members" >> "$GITHUB_OUTPUT" ;;
+            "30 */6 * * *") echo "job=sync-contests" >> "$GITHUB_OUTPUT" ;;
+            "30 3 * * *") echo "job=inactive-digest" >> "$GITHUB_OUTPUT" ;;
+            *) echo "job=${{ inputs.job }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - run: pnpm worker ${{ steps.pick.outputs.job }}
